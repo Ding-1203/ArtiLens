@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="ArtiLens - 你的学术论文阅读助手">
+    <meta name="keywords" content="论文分析,PDF解析,AI问答,学术研究,智能助手">
+    <title>ArtiLens - 智能论文阅读助手</title>
+    <link rel="stylesheet" href="index.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/github-markdown-css/github-markdown.min.css">
+    <link rel="stylesheet" href="markdown-body.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+</head>
+<body>
+<div class="container">
+    <!-- 头部导航 -->
+    <header class="header">
+        <div class="header-content">
+            <h1 class="logo">
+                <i class="fas fa-graduation-cap"></i>
+                ArtiLens
+            </h1>
+            <nav class="nav">
+                <button class="nav-btn active" data-tab="upload" title="上传论文">
+                    <i class="fas fa-cloud-upload-alt"></i>
+                    上传论文
+                </button>
+                <button class="nav-btn" data-tab="papers" title="我的论文">
+                    <i class="fas fa-file-alt"></i>
+                    我的论文
+                </button>
+                <button class="nav-btn" data-tab="login" title="登录">
+                    <i class="fas fa-sign-in-alt"></i>
+                    登录
+                </button>
+                <button class="nav-btn" data-tab="register" title="注册">
+                    <i class="fas fa-user-plus"></i>
+                    注册
+                </button>
+                <!-- 用户信息显示 -->
+                <div id="user-info">
+                    <img src="https://cdn-icons-png.flaticon.com/512/149/149071.png" alt="用户头像" class="user-icon">
+                    <span id="current-user">未登录</span>
+                </div>
+            </nav>
+        </div>
+    </header>
+
+    <!-- 主要内容区域 -->
+    <main class="main">
+        <!-- 上传论文页面 -->
+        <div id="upload-tab" class="tab-content active">
+            <div class="upload-section">
+                <div class="upload-card">
+                    <div class="upload-icon">
+                        <i class="fas fa-cloud-upload-alt"></i>
+                    </div>
+                    <h2>上传学术论文</h2>
+                    <p>支持PDF格式，文件大小不超过50MB</p>
+
+                    <div class="upload-area" id="upload-area">
+                        <input type="file" id="file-input" accept=".pdf" hidden>
+                        <div class="upload-placeholder">
+                            <i class="fas fa-plus"></i>
+                            <span>点击或拖拽文件到此处</span>
+                        </div>
+                    </div>
+
+                    <div class="upload-progress" id="upload-progress" style="display: none;">
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progress-fill"></div>
+                        </div>
+                        <span class="progress-text" id="progress-text">上传中...</span>
+                    </div>
+
+                    <button class="btn btn-primary" id="upload-btn" disabled>
+                        <i class="fas fa-upload"></i>
+                        开始上传
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 我的论文页面 -->
+        <div id="papers-tab" class="tab-content">
+            <div class="papers-section">
+                <div class="section-header">
+                    <h2>我的论文</h2>
+                    <button class="btn btn-secondary" id="refresh-papers">
+                        <i class="fas fa-sync-alt"></i>
+                        刷新
+                    </button>
+                </div>
+
+                <div class="papers-grid" id="papers-grid">
+                    <!-- 论文卡片将通过JavaScript动态生成 -->
+                </div>
+            </div>
+        </div>
+
+        <!-- FIX 1: 添加登录表单的HTML结构 -->
+        <div id="login-tab" class="tab-content">
+            <section class="form-section">
+                <h2>用户登录</h2>
+                <form id="login-form">
+                    <div class="form-group">
+                        <label for="login-username">用户名</label>
+                        <input type="text" id="login-username" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="login-email">邮箱</label>
+                        <input type="email" id="login-email" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary" style="width: 100%;">登录</button>
+                </form>
+            </section>
+        </div>
+
+        <!-- FIX 2: 添加注册表单的HTML结构 -->
+        <div id="register-tab" class="tab-content">
+            <section class="form-section">
+                <h2>新用户注册</h2>
+                <form id="register-form">
+                    <div class="form-group">
+                        <label for="register-username">用户名</label>
+                        <input type="text" id="register-username" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="register-email">邮箱</label>
+                        <input type="email" id="register-email" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary" style="width: 100%;">注册</button>
+                </form>
+            </section>
+        </div>
+
+        <!-- 论文阅读与问答整合视图 -->
+        <div id="viewer-tab" class="tab-content">
+            <div class="viewer-wrapper">
+                <div class="pdf-pane" id="pdf-pane">
+                    <iframe id="pdf-viewer-frame" src="" frameborder="0"></iframe>
+                </div>
+
+                <!-- FIX 3: 为水平分割器添加 ID -->
+                <div class="splitter horizontal-splitter" id="horizontal-splitter">
+                    <div class="splitter-handle">
+                        <i class="fas fa-ellipsis-v splitter-icon"></i>
+                    </div>
+                </div>
+
+                <div class="details-pane" id="details-pane">
+                    <!--  上半部分  -->
+                    <div class="info-pane" id="info-pane">
+                        <div class="viewer-content">
+                            <div class="viewer-nav">
+                                <button class="viewer-tab-btn active" data-target="info-summary">核心信息</button>
+                                <button class="viewer-tab-btn" data-target="translation">中文翻译</button>
+                                <button class="viewer-tab-btn" data-target="terminology">术语解释</button>
+                                <button class="viewer-tab-btn" data-target="image-formula-understanding">图像公式
+                                </button>
+                                <button class="viewer-tab-btn" data-target="research-context">研究脉络</button>
+                                <button class="viewer-tab-btn" data-target="related-papers">相关论文</button>
+                            </div>
+
+                            <div class="viewer-section" data-section="info-summary" id="paper-info-summary"
+                                 style="display: block;">
+                            </div>
+
+                            <div class="viewer-section" data-section="translation" style="display: none;">
+                                <div class="detail-section">
+                                    <h3>上下文感知翻译</h3>
+                                    <div id="interactive-translation-ui">
+                                        <div class="instructions">
+                                            <i class="fas fa-mouse-pointer"></i>
+                                            <strong>翻译支持:</strong> 在左侧 PDF 中高亮选择文本。
+                                        </div>
+                                        <div id="staged-text-container" style="display: none; margin-top: 1rem;">
+                                            <p><strong>待翻译原文:</strong></p>
+                                            <blockquote id="staged-text-preview"
+                                                        style="background: #f8f9fa; border-left: 3px solid var(--primary-color); padding: 0.5rem 1rem; margin: 0.5rem 0; font-style: italic;"></blockquote>
+                                            <button id="execute-translate-btn" class="btn btn-primary">
+                                                <i class="fas fa-language"></i> 确认翻译
+                                            </button>
+                                        </div>
+                                        <hr style="margin: 1.5rem 0;">
+                                        <div id="translation-output-container">
+                                            <p><strong>翻译结果:</strong></p>
+                                            <div id="translation-output">
+                                                <p class="placeholder">文段翻译将显示于此。使用上方工具进行实时翻译。</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="viewer-section" data-section="terminology" style="display: none;">
+                                <div class="detail-section">
+                                    <pre id="viewer-terminology"></pre>
+                                </div>
+                            </div>
+
+                            <div class="viewer-section" data-section="image-formula-understanding"
+                                 style="display: none;">
+                                <div class="detail-section">
+                                    <h3>图片/公式理解</h3>
+                                    <div id="image-understanding-ui">
+                                        <div class="instructions">
+                                            <i class="fas fa-crop-alt"></i>
+                                            <strong>操作方法:</strong>
+                                            <ol style="margin-left: 20px; margin-top: 5px; font-size: 0.85rem;">
+                                                <li>点击下方的“开始截图”按钮。</li>
+                                                <li>在左侧PDF区域，按住鼠标左键并拖拽以选择您想分析的图片或公式。</li>
+                                                <li>松开鼠标即可完成截图。</li>
+                                            </ol>
+                                        </div>
+                                        <button id="start-screenshot-btn" class="btn btn-secondary"
+                                                style="margin-top: 1rem;">
+                                            <i class="fas fa-crop-alt"></i> 开始截图
+                                        </button>
+                                        <button id="cancel-screenshot-btn" class="btn btn-danger"
+                                                style="display:none; margin-left:8px;">
+                                            <i class="fas fa-times"></i> 取消截图
+                                        </button>
+                                        <!-- This container will show the clicked image and the analysis -->
+                                        <div id="image-analysis-container" style="margin-top: 1rem;">
+                                            <!-- The result will be populated here by JS -->
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="viewer-section" data-section="research-context" style="display: none;">
+                                <div class="detail-section">
+                                    <div id="viewer-research-context"></div>
+                                </div>
+                            </div>
+
+                            <div class="viewer-section" data-section="related-papers" style="display: none;">
+                                <div class="detail-section">
+                                    <div id="viewer-related-papers"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- FIX 4: 为垂直分割器添加 ID -->
+                    <div class="splitter vertical-splitter" id="vertical-splitter">
+                        <div class="splitter-handle">
+                            <i class="fas fa-ellipsis-h splitter-icon"></i>
+                        </div>
+                    </div>
+
+                    <!-- 问答框 -->
+                    <div class="chat-container" id="chat-container">
+                        <!-- FIX 5: 添加聊天工具栏和清空历史按钮 -->
+                        <div class="chat-toolbar">
+                            <div class="chat-toolbar-left">
+                                <div class="chat-title">
+                                    <i class="fas fa-comments"></i>
+                                    <span>AI 问答</span>
+                                </div>
+                            </div>
+                            <div class="chat-toolbar-right">
+                                <button class="toolbar-btn" id="clear-history-btn" title="清除当前论文的聊天记录">
+                                    <i class="fas fa-trash-alt"></i>
+                                    <span>清除历史</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="chat-messages" id="chat-messages">
+                            <div class="welcome-message">
+                                <i class="fas fa-robot"></i>
+                                <p>您好！我是您的论文分析助手。您可以向我提问关于论文的任何问题。</p>
+                            </div>
+                        </div>
+                        <div class="chat-input-area">
+                            <div class="chat-input-container">
+                                <input type="text" id="chat-input" placeholder="请输入您的问题...">
+                                <button id="send-btn" class="send-btn">
+                                    <i class="fas fa-paper-plane"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <div id="loading" class="loading" style="display: none;">
+        <div class="loading-content">
+            <div class="spinner"></div>
+            <p>正在处理中，请稍候...</p>
+        </div>
+    </div>
+
+    <div id="notification" class="notification">
+        <div class="notification-content">
+            <span id="notification-text"></span>
+            <button id="notification-close">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+    </div>
+</div>
+
+<div id="diagram-modal" class="diagram-modal">
+    <span class="diagram-modal-close" id="diagram-modal-close">×</span>
+    <div class="diagram-modal-content" id="diagram-modal-content"></div>
+</div>
+
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\\(', '\\)']],
+            displayMath: [['$$', '$$'], ['\\[', '\\]']]
+        },
+    };
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/canvg/dist/browser/canvg.min.js"></script>
+<script src="index.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script id="MathJax-script" async
+        src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</body>
+</html>

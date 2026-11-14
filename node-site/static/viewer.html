@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Viewer (Fast Zoom Optimized)</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf_viewer.css"/>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            background-color: #f1f1f1;
+            font-family: sans-serif;
+            overflow: hidden;
+        }
+
+        ::selection {
+            background: rgba(0, 150, 255, 0.3);
+        }
+
+        #viewer-container {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            text-align: center;
+        }
+
+        .page-container {
+            position: relative;
+            display: inline-block;
+            margin: 20px auto;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
+            background: #fff;
+            /* 动画优化 */
+            transition: transform 0.10s;
+        }
+
+        #controls {
+            position: fixed;
+            bottom: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 5px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            z-index: 100;
+            box-shadow: 0 0 8px rgba(0, 0, 0, 0.5);
+        }
+
+        #controls button {
+            background: #444;
+            color: white;
+            border: 1px solid #666;
+            cursor: pointer;
+            border-radius: 3px;
+            min-width: 25px;
+        }
+
+        #controls span {
+            font-size: 14px;
+            padding: 0 10px;
+            white-space: nowrap;
+        }
+
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            border-left: 1px solid #666;
+            padding-left: 10px;
+            margin-left: 5px;
+        }
+
+        #screenshot-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 200;
+            cursor: crosshair;
+        }
+    </style>
+</head>
+<body>
+<div id="viewer-container"></div>
+
+<div id="controls">
+    <button id="prev">‹</button>
+    <span>Page: <span id="page_num">1</span> / <span id="page_count">...</span></span>
+    <button id="next">›</button>
+    <div class="control-group">
+        <button id="zoom_out">-</button>
+        <span id="zoom_percent">100%</span>
+        <button id="zoom_in">+</button>
+    </div>
+</div>
+<canvas id="screenshot-overlay" style="display:none;"></canvas>
+
+<script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.worker.min.js';
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const url = urlParams.get('file');
+    const viewerContainer = document.getElementById('viewer-container');
+    const pageNumSpan = document.getElementById('page_num');
+    const pageCountSpan = document.getElementById('page_count');
+    const zoomPercentSpan = document.getElementById('zoom_percent');
+    const prevButton = document.getElementById('prev');
+    const nextButton = document.getElementById('next');
+    const zoomInButton = document.getElementById('zoom_in');
+    const zoomOutButton = document.getElementById('zoom_out');
+
+    // 状态变量
+    let pdfDoc = null;
+    let currentPage = 1;
+    let scale = 1.0;         // 真实缩放比例
+    let unscaledViewport = null;
+
+    // let debounceRenderTimer = null;   // 用于防抖
+    // let pendingScale = null;          // 等待生效的目标scale
+    //
+    // // ——实时更新 CSS transform, 只在“最后一次”后重渲——
+    // async function doDebouncedRender(newScale) {
+    //     // 1. 先只用 CSS transform（视觉缩放，不卡）
+    //     for (const page of viewerContainer.querySelectorAll('.page-container')) {
+    //         page.style.transform = `scale(${newScale / scale})`;
+    //         page.style.transformOrigin = 'top left';
+    //     }
+    //     zoomPercentSpan.textContent = `${Math.round(newScale * 100)}%`;
+    //     pendingScale = newScale;
+    //
+    //     // 2. 防抖：等用户操作停下来了再渲染高清
+    //     if (debounceRenderTimer) clearTimeout(debounceRenderTimer);
+    //     debounceRenderTimer = setTimeout(async () => {
+    //         scale = pendingScale;
+    //         // 清除 transform，重新高清渲染
+    //         await rerenderAllPagesWithAnchor(scale);
+    //         for (const page of viewerContainer.querySelectorAll('.page-container')) {
+    //             page.style.transform = '';
+    //         }
+    //         debounceRenderTimer = null;
+    //         pendingScale = null;
+    //     }, 300); // 300ms，无新操作就高清重渲
+    // }
+
+    let debounceRenderTimer = null;
+    let pendingScale = null;
+    let isRendering = false; // 渲染锁
+
+    async function doDebouncedRender(newScale) {
+        pendingScale = newScale;
+        // 实时预览：只用transform视觉缩放
+        for (const page of viewerContainer.querySelectorAll('.page-container')) {
+            page.style.transform = `scale(${pendingScale / scale})`;
+            page.style.transformOrigin = 'top left';
+        }
+        zoomPercentSpan.textContent = `${Math.round(pendingScale * 100)}%`;
+
+        if (debounceRenderTimer) clearTimeout(debounceRenderTimer);
+        debounceRenderTimer = setTimeout(() => {
+            triggerHiResRender();
+        }, 300);
+    }
+
+    async function triggerHiResRender() {
+        // 如果渲染中，等下次防抖再触发（只保留最新一次）
+        if (isRendering) return;
+        isRendering = true;
+        // 保存当前的待渲染 scale
+        const targetScale = pendingScale;
+        // 清除临时 transform
+        for (const page of viewerContainer.querySelectorAll('.page-container')) {
+            page.style.transform = '';
+        }
+        // 真正高清渲染
+        await rerenderAllPagesWithAnchor(targetScale);
+        scale = targetScale; // 更新全局 scale
+        isRendering = false;
+        // 检查期间是否有新scale被设置，如果有，自动再触发一次
+        if (pendingScale !== scale) {
+            triggerHiResRender();
+        }
+    }
+
+    // ========== 锚点缩放相关 ==========
+    let zoomAnchor = null;
+
+    function saveCenterAnchor() {
+        const centerX = viewerContainer.scrollLeft + viewerContainer.clientWidth / 2;
+        const centerY = viewerContainer.scrollTop + viewerContainer.clientHeight / 2;
+        const relX = centerX / viewerContainer.scrollWidth;
+        const relY = centerY / viewerContainer.scrollHeight;
+        zoomAnchor = {relX, relY};
+    }
+
+    function restoreCenterAnchor() {
+        if (!zoomAnchor) return;
+        const x = zoomAnchor.relX * viewerContainer.scrollWidth;
+        const y = zoomAnchor.relY * viewerContainer.scrollHeight;
+        viewerContainer.scrollLeft = x - viewerContainer.clientWidth / 2;
+        viewerContainer.scrollTop = y - viewerContainer.clientHeight / 2;
+        zoomAnchor = null;
+    }
+
+    // ========== 渲染 ==========
+    async function renderPage(pageContainer, num, useScale) {
+        const page = await pdfDoc.getPage(num);
+        const viewport = page.getViewport({scale: useScale});
+        const devicePixelRatio = window.devicePixelRatio || 1;
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = Math.floor(viewport.width * devicePixelRatio);
+        canvas.height = Math.floor(viewport.height * devicePixelRatio);
+        canvas.style.width = `${Math.floor(viewport.width)}px`;
+        canvas.style.height = `${Math.floor(viewport.height)}px`;
+        ctx.scale(devicePixelRatio, devicePixelRatio);
+
+        const textLayerDiv = document.createElement('div');
+        textLayerDiv.className = 'textLayer';
+
+        pageContainer.innerHTML = '';
+        pageContainer.appendChild(canvas);
+        pageContainer.appendChild(textLayerDiv);
+        pageContainer.style.width = canvas.style.width;
+        pageContainer.style.height = canvas.style.height;
+
+        await page.render({canvasContext: ctx, viewport}).promise;
+        const textContent = await page.getTextContent();
+        pdfjsLib.renderTextLayer({textContent, container: textLayerDiv, viewport, textDivs: []});
+    }
+
+    async function renderAllPages(useScale) {
+        const tempContainer = document.createElement('div');
+        tempContainer.style.display = 'contents';
+        for (let i = 1; i <= pdfDoc.numPages; i++) {
+            const pageContainer = document.createElement('div');
+            pageContainer.className = 'page-container';
+            pageContainer.id = `page-container-${i}`;
+            tempContainer.appendChild(pageContainer);
+        }
+        // 渲染全部
+        const renders = [];
+        let i = 1;
+        for (const pageContainer of tempContainer.children) {
+            renders.push(renderPage(pageContainer, i++, useScale));
+        }
+        await Promise.all(renders);
+
+        viewerContainer.innerHTML = '';
+        while (tempContainer.firstChild) viewerContainer.appendChild(tempContainer.firstChild);
+    }
+
+    async function rerenderAllPagesWithAnchor(newScale) {
+        saveCenterAnchor();
+        await renderAllPages(newScale);
+        restoreCenterAnchor();
+    }
+
+    // ========== 交互 ==========
+
+    const goToPage = (num) => {
+        if (!pdfDoc || num < 1 || num > pdfDoc.numPages) return;
+        currentPage = num;
+        pageNumSpan.textContent = currentPage;
+        const pageElement = document.getElementById(`page-container-${num}`);
+        if (pageElement)
+            pageElement.scrollIntoView({behavior: 'smooth', block: 'start'});
+    };
+
+    async function initPDFViewer() {
+        pdfjsLib.getDocument(url).promise.then(async (doc) => {
+            pdfDoc = doc;
+            pageCountSpan.textContent = pdfDoc.numPages;
+            const firstPage = await pdfDoc.getPage(1);
+            unscaledViewport = firstPage.getViewport({scale: 1});
+            // 自动缩放，适应容器宽
+            scale = (viewerContainer.clientWidth / unscaledViewport.width) * 0.95;
+            zoomPercentSpan.textContent = `${Math.round(scale * 100)}%`;
+            await renderAllPages(scale);
+            goToPage(1);
+        }).catch(err => {
+            console.error('Error loading PDF:', err);
+            parent.postMessage({type: 'pdfError', message: 'Could not load PDF file.'}, '*');
+        });
+    }
+
+    // ========== 控件事件 ==========
+    prevButton.addEventListener('click', () => goToPage(currentPage - 1));
+    nextButton.addEventListener('click', () => goToPage(currentPage + 1));
+    zoomInButton.addEventListener('click', () => {
+        doDebouncedRender(scale + 0.25);
+    });
+    zoomOutButton.addEventListener('click', () => {
+        doDebouncedRender(scale - 0.25);
+    });
+    const ZOOM_FACTOR = 1.8;
+    viewerContainer.addEventListener('wheel', function (e) {
+        if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            let next = e.deltaY < 0 ? scale * ZOOM_FACTOR : scale / ZOOM_FACTOR;
+            next = Math.max(0.25, Math.min(next, 5.0));
+            doDebouncedRender(next);
+        }
+    }, {passive: false});
+
+
+    // ========== 页面滚动更新当前页 ==========
+    let scrollTimeout;
+    viewerContainer.addEventListener('scroll', () => {
+        clearTimeout(scrollTimeout);
+        scrollTimeout = setTimeout(() => {
+            let mostVisiblePage = 1, maxVisibleHeight = 0;
+            for (let i = 0; i < viewerContainer.children.length; i++) {
+                const page = viewerContainer.children[i];
+                const rect = page.getBoundingClientRect();
+                const visibleHeight = Math.max(0, Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0));
+                if (visibleHeight > maxVisibleHeight) {
+                    maxVisibleHeight = visibleHeight;
+                    mostVisiblePage = i + 1;
+                }
+            }
+            currentPage = mostVisiblePage;
+            pageNumSpan.textContent = currentPage;
+        }, 150);
+    });
+
+
+    // ------- 截图功能保持不变 -------
+
+    // 截图相关变量
+    const overlayCanvas = document.getElementById('screenshot-overlay');
+    const overlayCtx = overlayCanvas.getContext('2d');
+    let isScreenshotMode = false, isDrawing = false, startX, startY, endX, endY;
+
+    function activateScreenshot() {
+        isScreenshotMode = true;
+        overlayCanvas.width = viewerContainer.clientWidth;
+        overlayCanvas.height = viewerContainer.clientHeight;
+        overlayCanvas.style.display = 'block';
+    }
+
+    function deactivateScreenshot() {
+        isScreenshotMode = false;
+        isDrawing = false;
+        overlayCanvas.style.display = 'none';
+        overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+        parent.postMessage({type: 'screenshotEnded'}, '*');
+    }
+
+    function handleMouseDown(e) {
+        if (!isScreenshotMode) return;
+        const rect = overlayCanvas.getBoundingClientRect();
+        isDrawing = true;
+        startX = e.clientX - rect.left;
+        startY = e.clientY - rect.top;
+    }
+
+    function handleMouseMove(e) {
+        if (!isDrawing) return;
+        const rect = overlayCanvas.getBoundingClientRect();
+        endX = e.clientX - rect.left;
+        endY = e.clientY - rect.top;
+        overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+        overlayCtx.fillStyle = 'rgba(100,150,255,0.3)';
+        overlayCtx.strokeStyle = 'rgba(100,150,255,0.8)';
+        overlayCtx.lineWidth = 1;
+        const width = endX - startX, height = endY - startY;
+        overlayCtx.fillRect(startX, startY, width, height);
+        overlayCtx.strokeRect(startX, startY, width, height);
+    }
+
+    async function handleMouseUp(e) {
+        if (!isDrawing) return;
+        const rect = overlayCanvas.getBoundingClientRect();
+        const selectionRect = {
+            left: Math.min(startX, e.clientX - rect.left),
+            top: Math.min(startY, e.clientY - rect.top),
+            width: Math.abs(e.clientX - startX),
+            height: Math.abs(e.clientY - startY)
+        };
+        deactivateScreenshot();
+        if (selectionRect.width < 10 || selectionRect.height < 10) return;
+        for (let i = 1; i <= pdfDoc.numPages; i++) {
+            const pageContainer = document.getElementById(`page-container-${i}`);
+            const pageCanvas = pageContainer.querySelector('canvas');
+            const pageRect = pageContainer.getBoundingClientRect();
+            if (selectionRect.left < pageRect.right && selectionRect.left + selectionRect.width > pageRect.left &&
+                selectionRect.top < pageRect.bottom && selectionRect.top + selectionRect.height > pageRect.top) {
+                const devicePixelRatio = window.devicePixelRatio || 1;
+                const cropX = (selectionRect.left - pageRect.left) * devicePixelRatio;
+                const cropY = (selectionRect.top - pageRect.top) * devicePixelRatio;
+                const cropWidth = selectionRect.width * devicePixelRatio;
+                const cropHeight = selectionRect.height * devicePixelRatio;
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = cropWidth;
+                tempCanvas.height = cropHeight;
+                const tempCtx = tempCanvas.getContext('2d');
+                tempCtx.drawImage(pageCanvas, cropX, cropY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
+                const imageDataUrl = tempCanvas.toDataURL('image/png').split(',')[1];
+                parent.postMessage({
+                    type: 'pdfRegionCropped',
+                    payload: {imageData: imageDataUrl}
+                }, '*');
+                return;
+            }
+        }
+    }
+
+    overlayCanvas.addEventListener('mousedown', handleMouseDown);
+    overlayCanvas.addEventListener('mousemove', handleMouseMove);
+    overlayCanvas.addEventListener('mouseup', handleMouseUp);
+    overlayCanvas.addEventListener('mouseleave', () => {
+        if (isDrawing) deactivateScreenshot();
+    });
+
+    // 父窗口消息监听
+    window.addEventListener('message', (event) => {
+        if (event.data && event.data.type === 'activateScreenshotMode')
+            activateScreenshot();
+    });
+    window.addEventListener('message', (event) => {
+        if (event.data && event.data.type === 'deactivateScreenshotMode')
+            deactivateScreenshot();
+    });
+    // 选中文本传给父窗口
+    document.addEventListener('mouseup', () => {
+        const selectedText = window.getSelection().toString().trim();
+        if (selectedText.length > 5 && selectedText.includes(' ')) {
+            parent.postMessage({type: 'pdfTextSelection', text: selectedText}, '*');
+        }
+    });
+    // 页面加载自动初始化
+    window.addEventListener('DOMContentLoaded', () => {
+        initPDFViewer();
+    });
+</script>
+
+</body>
+</html>

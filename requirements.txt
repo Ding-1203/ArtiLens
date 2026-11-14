@@ -1,0 +1,36 @@
+# --- FastAPI + API 基础 ---
+dashscope==1.23.8
+fastapi==0.116.0
+uvicorn==0.35.0
+python-multipart==0.0.20
+python-dotenv==1.1.1
+pydantic==2.11.7
+pydantic[email]
+
+# --- 数据处理 / DB ---
+sqlalchemy==2.0.41
+PyPDF2==3.0.1
+pymupdf==1.26.3
+unstructured[pdf]
+pytesseract==0.3.13
+beautifulsoup4==4.13.4
+pillow==11.3.0
+numpy==2.2.6
+pandas==2.3.1
+
+# --- 向量 / 嵌入 ---
+sentence-transformers==5.0.0
+chromadb==1.0.15
+
+# --- LangChain Core ---
+langchain==0.3.26
+langchain-core==0.3.68
+langchain-community==0.3.27
+langgraph==0.5.1
+
+# --- 会话 ---
+feedparser==6.0.11
+requests==2.32.4
+
+zhipuai
+oss2
